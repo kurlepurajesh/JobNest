@@ -2,8 +2,13 @@ services:
   - type: web
     name: jobnest
     env: node
-    buildCommand: npm install && npm run install-all
-    startCommand: npm start
+    region: oregon
+    plan: free
+    buildCommand: |
+      npm ci
+      cd client && npm ci && npm run build
+      cd ../server && npm ci
+    startCommand: cd server && node index.js
     envVars:
       - key: NODE_ENV
         value: production
@@ -21,8 +26,12 @@ services:
         sync: false
       - key: SESSION_SECRET
         generateValue: true
+      - key: DB_SSL
+        value: "true"
+    staticPublishPath: ./client/build
 
 databases:
   - name: jobnest_db
     databaseName: jobnest
     plan: free
+    ipAllowList: [] # only allow internal connections
