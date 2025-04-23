@@ -1,5 +1,6 @@
 const express = require("express");
 const cors = require("cors");
+const path = require("path");
 require("dotenv").config();
 
 
@@ -16,13 +17,15 @@ const session = require("express-session");
 const passport = require("passport");
 require("./middleware/passport");
 const authRoutes = require("./routes/authRoutes");
-const trackRoutes = require('./routes/trackRoutes');
+const trackRoutes = require("./routes/trackRoutes");
 
 const app = express();
 const PORT = process.env.PORT;
 
 app.use(cors({
-  origin: "http://localhost:3000", // Don't use '*'
+  origin: process.env.NODE_ENV === "production" 
+    ? "https://jobnest.onrender.com" 
+    : "http://localhost:3000",
   credentials: true                // Allow cookies & sessions
 }));
 app.use(express.json());
@@ -72,15 +75,25 @@ app.get("/api/store-jobs", async (req, res) => {
   }
 });
 
+// API routes
 app.use('/api/job', jobRoutes);
 app.use("/api/jobss", savedJobsRoute);
 app.use('/api/track', trackRoutes);
 app.use("/api/auth", authRoutes);
 app.use('/api/profile', profileRoutes);
-
 app.use('/api/optimize', resumeRoutes);
 
+// Serve static files in production
+if (process.env.NODE_ENV === "production") {
+  // Serve static files from the React build directory
+  app.use(express.static(path.join(__dirname, "../client/build")));
+  
+  // Handle React routing, return all requests to React app
+  app.get("*", (req, res) => {
+    res.sendFile(path.join(__dirname, "../client/build", "index.html"));
+  });
+}
 
 app.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
+  console.log(`Server running on port ${PORT}`);
 });
