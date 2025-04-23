@@ -3,6 +3,7 @@ const path = require('path');
 const { exec } = require('child_process');
 const client = require('../db');
 const scriptPath = path.join(__dirname, 'email_parser.py');
+
 // Create a new job application
 const createJobApplication = async (req, res) => {
     try {
@@ -75,15 +76,12 @@ const getAllJobs = async (req, res) => {
     }
   };
 
-// controllers/jobsController.js
-
-// Get all job applications for a user
+// Get all job applications for a user with email status updates
 const getAllJob = async (req, res) => {
     try {
         const userId = req.user.id;
-        const {  sortBy = 'dateModified', order = 'DESC' } = req.query;
+        const { sortBy = 'dateModified', order = 'DESC' } = req.query;
 
-        // Validating the sort and order parameters
         const validSortFields = ['company', 'role', 'status', 'dateApplied', 'dateModified'];
         const validOrders = ['ASC', 'DESC'];
 
@@ -100,52 +98,52 @@ const getAllJob = async (req, res) => {
 
         const result = await client.query(query, values);
         const jobs = result.rows;
-// Convert jobs to JSON string and escape double quotes
-const jobsJSON = JSON.stringify(jobs).replace(/"/g, '\\"');
-const command = `python3 ${scriptPath} "${jobsJSON}"`;
 
-        // Step 2: Send the fetched jobs to the Python script for processing
+        // Convert jobs to JSON string and escape double quotes
+        const jobsJSON = JSON.stringify(jobs).replace(/"/g, '\\"');
+        const command = `python3 ${scriptPath} "${jobsJSON}"`;
+
+        // Process emails and update job statuses
         exec(command, async (err, stdout, stderr) => {
             if (err) {
                 console.error(`Error executing script: ${err}`);
                 return res.status(500).json({ error: 'Failed to process emails' });
             }
 
-            // Step 3: Parse the output of the Python script (assuming it's JSON)
-            const emailStatuses = JSON.parse(stdout); // Example: { "SIP": "interview", "Intern-265557": "offer" }
+            try {
+                const emailStatuses = JSON.parse(stdout);
+                
+                for (const job of jobs) {
+                    const match = emailStatuses.find(
+                        (entry) =>
+                            entry.company.toLowerCase() === job.company.toLowerCase() &&
+                            entry.role.toLowerCase() === job.role.toLowerCase()
+                    );
+                    
+                    if (match && match.status !== 'unknown') {
+                        await client.query(`
+                            UPDATE appliedjobs
+                            SET status = $1, dateModified = NOW()
+                            WHERE user_id = $2 AND company = $3 AND role = $4
+                        `, [match.status, userId, job.company, job.role]);
+                        
+                        job.status = match.status;
+                    }
+                }
 
-           
-    for (const job of jobs) {
-        const match = emailStatuses.find(
-            (entry) =>
-                entry.company.toLowerCase() === job.company.toLowerCase() &&
-                entry.role.toLowerCase() === job.role.toLowerCase()
-        );
-        if (match && match.status !== 'unknown') {
-            await client.query(`
-                UPDATE appliedjobs
-                SET status = $1, dateModified = NOW()
-                WHERE user_id = $2 AND company = $3 AND role = $4
-            `, [match.status, userId, job.company, job.role]);
-            
-
-            // Optional: update the job object sent back to frontend if needed
-            job.status = match.status;
-        }
-        // Else: leave status untouched in DB and frontend
-    }
-
-    return res.json(jobs);
-});
+                return res.json(jobs);
+            } catch (parseError) {
+                console.error('Failed to parse email statuses:', parseError);
+                return res.status(500).json({ error: 'Failed to process email statuses' });
+            }
+        });
     } catch (error) {
         console.error('Failed to fetch and update jobs:', error);
         res.status(500).json({ error: 'Failed to fetch job applications' });
     }
 };
 
-// controllers/jobsController.js
-
-// Update job application details (status, role, company, etc.)
+// Update job application details
 const updateJobApplication = async (req, res) => {
     try {
         const userId = req.user.id;
@@ -176,14 +174,8 @@ const updateJobApplication = async (req, res) => {
         res.status(500).json({ error: 'Failed to update job' });
     }
 };
-useEffect(() => {
-    fetchJobs();
-  }, [sortBy, sortOrder, filterStatus, searchTerm]);
 
-
-// controllers/jobsController.js
-
-// Delete job application by job_id and userId
+// Delete job application
 const deleteJobApplication = async (req, res) => {
     try {
         const { id } = req.params;
@@ -212,7 +204,6 @@ const deleteJobApplication = async (req, res) => {
         res.status(500).json({ error: 'Failed to delete job' });
     }
 };
-
 
 module.exports = {
     createJobApplication,
